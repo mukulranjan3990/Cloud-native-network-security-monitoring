@@ -103,21 +103,21 @@ Optional services are not required for the minimum viable project.
 
 ## 5. Core Technology Stack
 
-  Area                           Technology
-  ------------------------------ ---------------------------------------------
-  Cloud Platform                 AWS
-  Network                        VPC, Subnets, Route Tables, Security Groups
-  Compute                        EC2
-  Network Telemetry              VPC Flow Logs
-  Log Collection                 CloudWatch Logs
-  AWS API Monitoring             CloudTrail (optional)
-  Programming                    Python
-  AWS SDK                        Boto3
-  Database                       SQLite
-  Dashboard                      Streamlit
-  Threat Reference               MITRE ATT&CK
-  Security Logging Guidance      OWASP Logging Cheat Sheet
-  Security Framework Reference   NIST CSF 2.0
+| Area | Technology |
+| --- | --- |
+| Cloud Platform | AWS |
+| Network | VPC, Subnets, Route Tables, Security Groups |
+| Compute | EC2 |
+| Network Telemetry | VPC Flow Logs |
+| Log Collection | CloudWatch Logs |
+| AWS API Monitoring | CloudTrail (optional) |
+| Programming | Python |
+| AWS SDK | Boto3 |
+| Database | SQLite |
+| Dashboard | Streamlit |
+| Threat Reference | MITRE ATT&CK |
+| Security Logging Guidance | OWASP Logging Cheat Sheet |
+| Security Framework Reference | NIST CSF 2.0 |
 
 ## 6. Major Functional Modules
 
