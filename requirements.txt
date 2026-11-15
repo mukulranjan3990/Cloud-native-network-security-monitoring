@@ -1,0 +1,6 @@
+# Runtime dependencies for the current MVP
+boto3>=1.34,<2.0
+streamlit>=1.32,<2.0
+
+# Python standard-library modules (sqlite3, json, datetime, pathlib, etc.)
+# do not need to be installed separately.
