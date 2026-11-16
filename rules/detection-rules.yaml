@@ -1,0 +1,237 @@
+# Detection rules for Automated Cloud-Native Network Security Monitoring
+# These are project heuristics, not proof of a confirmed attack.
+#
+# Integration note:
+# src/detector.py currently uses matching defaults in Python. This YAML is
+# the centralized rule specification; runtime YAML loading is a follow-up task.
+# Editing this file alone does not yet change detector behavior.
+
+config:
+  schema_version: "1.0"
+  project: "cloud-native-network-security-monitoring"
+  timezone: "UTC"
+  evaluation_mode: "batch"
+  default_status: "OPEN"
+
+severity_bands:
+  CRITICAL: {minimum_score: 85, maximum_score: 100}
+  HIGH: {minimum_score: 65, maximum_score: 84}
+  MEDIUM: {minimum_score: 40, maximum_score: 64}
+  LOW: {minimum_score: 20, maximum_score: 39}
+  INFORMATIONAL: {minimum_score: 0, maximum_score: 19}
+
+rules:
+  - rule_id: "NET-001"
+    name: "Possible Port Scan"
+    enabled: true
+    status: "implemented"
+    event_type: "NETWORK_FLOW"
+    detection:
+      type: "unique_destination_ports_by_source"
+      window_seconds: 60
+      minimum_unique_destination_ports: 10
+      group_by: ["source_ip"]
+    severity: "HIGH"
+    risk_score_base: 55
+    mitre_attack: {technique_id: "T1046", technique_name: "Network Service Discovery"}
+    evidence_fields: ["source_ip", "destination_ip", "destination_port", "timestamp"]
+    recommendation: "Investigate the source and review exposed services and security-group rules."
+    limitations:
+      - "A scan-like pattern is suspicious but does not prove malicious intent."
+      - "Current detector emits at most one NET-001 finding per source per batch."
+
+  - rule_id: "NET-002"
+    name: "Internet-Exposed SSH"
+    enabled: false
+    status: "planned"
+    event_type: "AWS_RESOURCE_CONFIGURATION"
+    detection:
+      type: "security_group_ingress_exposure"
+      protocol: "tcp"
+      destination_port: 22
+      public_ipv4_cidr: "0.0.0.0/0"
+      public_ipv6_cidr: "::/0"
+    severity: "HIGH"
+    risk_score_base: 75
+    required_data_source: ["AWS EC2 security-group configuration"]
+    recommendation: "Restrict SSH to approved trusted source ranges and verify business need."
+    limitations: ["Not implemented by the current VPC Flow Log detector."]
+
+  - rule_id: "NET-003"
+    name: "Internet-Exposed RDP"
+    enabled: false
+    status: "planned"
+    event_type: "AWS_RESOURCE_CONFIGURATION"
+    detection:
+      type: "security_group_ingress_exposure"
+      protocol: "tcp"
+      destination_port: 3389
+      public_ipv4_cidr: "0.0.0.0/0"
+      public_ipv6_cidr: "::/0"
+    severity: "HIGH"
+    risk_score_base: 75
+    required_data_source: ["AWS EC2 security-group configuration"]
+    recommendation: "Restrict RDP to approved trusted source ranges and verify business need."
+    limitations: ["Not implemented by the current VPC Flow Log detector."]
+
+  - rule_id: "NET-004"
+    name: "Repeated Connection Attempts"
+    enabled: true
+    status: "implemented"
+    event_type: "NETWORK_FLOW"
+    detection:
+      type: "repeated_connections"
+      window_seconds: 300
+      minimum_attempts: 20
+      group_by: ["source_ip", "destination_ip", "destination_port"]
+    severity: "MEDIUM"
+    risk_score_base: 45
+    evidence_fields: ["source_ip", "destination_ip", "destination_port", "timestamp"]
+    recommendation: "Review the destination service and relevant authentication/application logs."
+    limitations:
+      - "Repeated connections alone do not prove brute-force activity."
+      - "Authentication logs are needed to establish repeated login failures."
+
+  - rule_id: "NET-005"
+    name: "Excessive Rejected Traffic"
+    enabled: true
+    status: "implemented"
+    event_type: "NETWORK_FLOW"
+    detection:
+      type: "rejected_flows_by_source"
+      window_seconds: 3600
+      minimum_rejected_flows: 100
+      required_action: "REJECT"
+      group_by: ["source_ip"]
+    severity: "HIGH"
+    risk_score_base: 55
+    evidence_fields: ["source_ip", "destination_ip", "destination_port", "action", "timestamp"]
+    recommendation: "Review flow records, security-group rules, network ACLs, and expected traffic."
+    limitations:
+      - "Threshold is an initial heuristic and must be tuned using lab data."
+      - "Current implementation counts flow records, not individual packets."
+
+  - rule_id: "NET-006"
+    name: "Suspicious Administrative Port"
+    enabled: true
+    status: "implemented"
+    event_type: "NETWORK_FLOW"
+    detection:
+      type: "sensitive_destination_port"
+      destination_ports: [22, 3389, 3306, 5432, 6379, 27017]
+    severity: "MEDIUM"
+    risk_score_base: 45
+    evidence_fields: ["source_ip", "destination_ip", "destination_port", "action"]
+    recommendation: "Confirm the source is authorized and the destination service is not unnecessarily exposed."
+    limitations:
+      - "A connection to a sensitive port is not inherently malicious."
+      - "Expected source and destination context should be considered."
+
+  - rule_id: "NET-007"
+    name: "Unusual Traffic Volume"
+    enabled: true
+    status: "implemented"
+    event_type: "NETWORK_FLOW"
+    detection:
+      type: "single_flow_byte_threshold"
+      minimum_bytes: 524288000
+    severity: "MEDIUM"
+    risk_score_base: 50
+    evidence_fields: ["source_ip", "destination_ip", "bytes", "timestamp"]
+    recommendation: "Validate the workload and investigate unexpected data transfer."
+    limitations:
+      - "Current implementation evaluates one flow, not an hourly aggregate."
+      - "This is a fixed threshold, not a learned traffic baseline."
+
+  - rule_id: "NET-008"
+    name: "Unusual AWS API Activity"
+    enabled: true
+    status: "implemented"
+    event_type: "AWS_API"
+    detection:
+      type: "cloudtrail_event_name"
+      event_names:
+        - "CreateAccessKey"
+        - "CreateLoginProfile"
+        - "PutUserPolicy"
+        - "AttachUserPolicy"
+        - "AttachRolePolicy"
+        - "PutRolePolicy"
+        - "CreatePolicyVersion"
+        - "SetDefaultPolicyVersion"
+    severity: "HIGH"
+    risk_score_base: 70
+    required_data_source: ["AWS CloudTrail management events"]
+    evidence_fields: ["event_name", "event_source", "source_ip", "user_arn"]
+    recommendation: "Confirm the actor, authorization, and business reason for the IAM change."
+    limitations:
+      - "CloudTrail collection and ingestion must be configured separately."
+      - "The current CloudWatch collector does not automatically discover CloudTrail trails."
+
+  - rule_id: "NET-009"
+    name: "Security Group Modification"
+    enabled: true
+    status: "implemented"
+    event_type: "AWS_API"
+    detection:
+      type: "cloudtrail_event_name"
+      event_names:
+        - "AuthorizeSecurityGroupIngress"
+        - "AuthorizeSecurityGroupEgress"
+        - "RevokeSecurityGroupIngress"
+        - "RevokeSecurityGroupEgress"
+        - "ModifySecurityGroupRules"
+        - "UpdateSecurityGroupRuleDescriptionsIngress"
+        - "UpdateSecurityGroupRuleDescriptionsEgress"
+    severity: "HIGH"
+    risk_score_base: 80
+    required_data_source: ["AWS CloudTrail management events"]
+    evidence_fields: ["event_name", "event_source", "source_ip", "resource"]
+    recommendation: "Verify the change against an approved change request and inspect resulting security-group rules."
+    limitations:
+      - "Detects modification API activity; it does not independently verify final effective configuration."
+
+  - rule_id: "NET-010"
+    name: "Repeated Authentication Failure"
+    enabled: false
+    status: "planned"
+    event_type: "AUTHENTICATION"
+    detection:
+      type: "authentication_failures_by_account_and_source"
+      window_seconds: 300
+      minimum_failures: 10
+      group_by: ["source_ip", "account_or_username"]
+    severity: "HIGH"
+    risk_score_base: 70
+    required_data_source:
+      - "Operating-system authentication logs or application authentication logs"
+    mitre_attack: {technique_id: "T1110", technique_name: "Brute Force"}
+    recommendation: "Review authentication logs, account activity, source context, and account-protection controls."
+    limitations:
+      - "VPC Flow Logs alone cannot establish authentication failures."
+      - "Not implemented by the current detector."
+
+# Must remain aligned with the initial scoring defaults in src/risk_scorer.py.
+# This is a project-defined prioritization heuristic, not an industry standard.
+risk_scoring:
+  method: "rule_base_with_context_adjustments"
+  minimum_score: 0
+  maximum_score: 100
+  rule_base_scores:
+    NET-001: 55
+    NET-002: 75
+    NET-003: 75
+    NET-004: 45
+    NET-005: 55
+    NET-006: 45
+    NET-007: 50
+    NET-008: 70
+    NET-009: 80
+  context_adjustments:
+    sensitive_remote_administration_ports: {ports: [22, 3389], points: 10}
+    rejected_flow: {points: 5}
+    port_scan_at_least_20_unique_ports: {points: 10}
+    world_open_cidr_in_security_group_request:
+      cidrs: ["0.0.0.0/0", "::/0"]
+      points: 10
+  severity_bands_reference: "severity_bands"
