@@ -2,193 +2,161 @@
 
 ## 1. Purpose
 
-This document specifies the initial rule-based detections for the **Automated Cloud-Native Network Security Monitoring & Automated Threat Detection System**. Rules must be explainable, testable, and tied to telemetry that the project actually collects.
+This document describes the rule identifiers, evidence, thresholds, expected behavior, and limitations of the project detector.
 
-The target is approximately **8–10 detection rules**. A rule must not claim to detect behavior when the required fields or log sources are unavailable.
+All rules are explainable heuristics. A triggered rule means that observed data matches a configured condition; it does not prove malicious intent.
 
-## 2. Common Rule Output
+## 2. Implementation Status
 
-Each triggered finding should include, where available:
+| Rule | Name | Status in current detector | Required telemetry |
+|---|---|---|---|
+| NET-001 | Possible Port Scan | Implemented | VPC Flow Logs |
+| NET-002 | Internet-Exposed SSH | Planned | EC2 Security Group configuration |
+| NET-003 | Internet-Exposed RDP | Planned | EC2 Security Group configuration |
+| NET-004 | Repeated Connection Attempts | Implemented | VPC Flow Logs |
+| NET-005 | Excessive Rejected Traffic | Implemented | VPC Flow Logs |
+| NET-006 | Suspicious Administrative Port | Implemented | VPC Flow Logs |
+| NET-007 | Unusual Traffic Volume | Implemented with fixed single-flow threshold | VPC Flow Logs |
+| NET-008 | Unusual AWS API Activity | Implemented for selected event names | CloudTrail management events |
+| NET-009 | Security Group Modification | Implemented for selected event names | CloudTrail management events |
+| NET-010 | Repeated Authentication Failure | Planned | OS/application authentication logs |
 
-- Finding ID
-- Rule ID
-- Detection title
-- Timestamp
-- Source and destination
-- Affected resource
-- Severity
-- Risk score
-- Evidence and reason for triggering
-- Recommended investigation or remediation
-- Status
+The YAML rule file is currently a declarative specification. The Python detector uses corresponding code defaults; it does not yet load the YAML file at runtime. Editing YAML alone will not change detector behavior.
 
-A rule match means that observed activity meets a detection condition. It does not automatically prove malicious intent.
-
-## 3. Initial Rule Catalogue
+## 3. Implemented Rules
 
 ### NET-001 — Possible Port Scan
 
-**Purpose:** Identify a source contacting many destination ports or hosts within a defined time window.
-
-- **Telemetry:** VPC Flow Logs.
-- **Candidate fields:** source IP, destination IP, destination port, protocol, timestamp.
-- **Logic:** Count distinct destination ports and/or destination hosts for a source within a configurable time window. Trigger when the configured threshold is exceeded.
-- **Initial severity:** Medium or High depending on scope and context.
-- **Evidence:** Source, time window, number of distinct ports/hosts, and relevant records.
-- **Recommended action:** Review the source, target, exposed services, and security-group rules.
-- **MITRE ATT&CK:** Potential mapping to T1046 (Network Service Discovery) when the observed behavior supports it.
-- **Caution:** Thresholds must be tested against normal traffic.
-
-### NET-002 — Internet-Exposed SSH
-
-**Purpose:** Identify an SSH exposure condition that is broader than intended.
-
-- **Telemetry:** Security-group configuration inspection and/or other suitable AWS configuration evidence.
-- **Candidate fields:** protocol, port 22, source CIDR, target resource.
-- **Logic:** Flag an SSH rule permitting broad public access when that access is not intended by the lab's policy.
-- **Initial severity:** High; context may justify a different rating.
-- **Evidence:** Security-group identifier, port, source range, and affected resource.
-- **Recommended action:** Restrict the source range and verify the intended administration path.
-- **Caution:** VPC Flow Logs alone do not prove that a security group is configured for public SSH access.
-
-### NET-003 — Internet-Exposed RDP
-
-**Purpose:** Identify an RDP exposure condition that is broader than intended.
-
-- **Telemetry:** Security-group configuration inspection and/or other suitable AWS configuration evidence.
-- **Candidate fields:** protocol, port 3389, source CIDR, target resource.
-- **Logic:** Flag a broad public RDP rule when it violates the intended lab policy.
-- **Initial severity:** High; context may justify a different rating.
-- **Evidence:** Security-group identifier, port, source range, and affected resource.
-- **Recommended action:** Restrict the source range or remove unnecessary exposure.
-- **Caution:** Flow records alone do not establish the security-group configuration.
+- **Purpose:** Identify one source contacting many unique destination ports within a short time window.
+- **Input:** `NETWORK_FLOW`.
+- **Default threshold:** At least 10 unique destination ports from one source within 60 seconds.
+- **Grouping:** Source IP.
+- **Evidence:** Source IP, destination IP(s), destination ports, timestamps, unique-port count, and window.
+- **Severity reference:** HIGH in the rule specification; final severity is derived from the risk score.
+- **MITRE ATT&CK:** T1046 — Network Service Discovery.
+- **Recommendation:** Investigate the source and review exposed services and security-group rules.
+- **Limitations:** Scan-like traffic may be authorized inventory, health checking, or testing. The current implementation emits at most one NET-001 finding per source per batch.
 
 ### NET-004 — Repeated Connection Attempts
 
-**Purpose:** Identify repeated connections from the same source to the same destination within a defined time window.
-
-- **Telemetry:** VPC Flow Logs.
-- **Candidate fields:** source IP, destination IP, destination port, timestamp, action.
-- **Logic:** Trigger when connection counts exceed a configurable threshold.
-- **Initial severity:** Low to Medium, raised only when context supports it.
-- **Evidence:** Count, time window, source/destination, and port.
-- **Recommended action:** Review whether the pattern is expected application behavior or probing.
-- **Caution:** Repeated connections are not automatically brute-force behavior.
+- **Purpose:** Identify repeated connections from one source to the same destination and port.
+- **Input:** `NETWORK_FLOW`.
+- **Default threshold:** At least 20 records within 300 seconds.
+- **Grouping:** Source IP, destination IP, destination port.
+- **Evidence:** Attempt count, source/destination, destination port, and time window.
+- **Recommendation:** Review the destination service and relevant authentication/application logs.
+- **Limitations:** Repeated network connections do not prove repeated login failures or brute-force activity. Authentication logs are needed to support that conclusion.
 
 ### NET-005 — Excessive Rejected Traffic
 
-**Purpose:** Identify unusually high rejected-flow counts.
+- **Purpose:** Identify a high number of rejected flow records from one source.
+- **Input:** `NETWORK_FLOW` where action is `REJECT`.
+- **Default threshold:** At least 100 rejected flow records within 3,600 seconds.
+- **Grouping:** Source IP.
+- **Evidence:** Rejected-flow count, source, and time window.
+- **Recommendation:** Review flow records, security-group rules, network ACLs, and expected traffic.
+- **Limitations:** The detector counts flow records, not individual packets. The threshold is an initial heuristic and should be tuned to the lab.
 
-- **Telemetry:** VPC Flow Logs.
-- **Candidate fields:** source IP, destination IP, action, timestamp, packets/bytes where useful.
-- **Logic:** Compare rejected-flow counts over a time window with a configured threshold or baseline.
-- **Initial severity:** Medium; increase only with supporting context.
-- **Evidence:** Rejected count, time window, and relevant source/destination information.
-- **Recommended action:** Investigate sources, targets, and relevant network rules.
-- **Caution:** High rejected traffic can have benign causes.
+### NET-006 — Suspicious Administrative Port
 
-### NET-006 — Suspicious Administrative or Database Port
-
-**Purpose:** Identify traffic to sensitive ports that is unexpected for the lab.
-
-- **Telemetry:** VPC Flow Logs plus documented expected network relationships where possible.
-- **Candidate ports:** 22, 3389, 3306, 5432, 6379, 27017.
-- **Logic:** Flag traffic to selected ports when the source, destination, or direction is outside the expected policy.
-- **Initial severity:** Medium; severity depends on exposure and resource sensitivity.
-- **Evidence:** Source, destination, port, action, and policy context.
-- **Recommended action:** Verify the service, source, and intended access.
-- **Caution:** Port numbers alone do not prove that a service is running or that access is malicious.
+- **Purpose:** Flag flows targeting selected sensitive administrative or database ports.
+- **Input:** `NETWORK_FLOW`.
+- **Ports:** 22 (SSH), 3389 (RDP), 3306 (MySQL), 5432 (PostgreSQL), 6379 (Redis), 27017 (MongoDB).
+- **Evidence:** Source IP, destination IP, destination port, and flow action.
+- **Recommendation:** Confirm that the source is authorized and the destination service is not unnecessarily exposed.
+- **Limitations:** A connection to one of these ports is not inherently malicious. Expected source, destination, and workload context matter.
 
 ### NET-007 — Unusual Traffic Volume
 
-**Purpose:** Identify a significant increase in observed traffic volume.
+- **Purpose:** Flag an individual flow whose byte count exceeds a fixed threshold.
+- **Input:** `NETWORK_FLOW`.
+- **Default threshold:** 500 MiB (`524,288,000` bytes) for one flow.
+- **Evidence:** Source, destination, byte count, and threshold.
+- **Recommendation:** Validate the workload and investigate unexpected data transfer.
+- **Limitations:** This is not an hourly aggregate, learned baseline, or machine-learning anomaly detector. A legitimate backup or data-processing task may exceed the threshold.
 
-- **Telemetry:** VPC Flow Logs.
-- **Candidate fields:** source/destination, bytes, packets, start/end time.
-- **Logic:** Compare traffic volume within a time window against a documented baseline or configurable threshold.
-- **Initial severity:** Low to Medium until validated.
-- **Evidence:** Observed volume, baseline/threshold, and time window.
-- **Recommended action:** Check expected workload changes and investigate unexplained spikes.
-- **Caution:** A meaningful baseline must be established; no universal threshold is assumed.
+### NET-008 — Unusual AWS API Activity
 
-### NET-008 — Unusual AWS API Activity (Optional)
+- **Purpose:** Identify selected IAM/access-management API event names.
+- **Input:** `AWS_API` derived from CloudTrail.
+- **Selected event names:** `CreateAccessKey`, `CreateLoginProfile`, `PutUserPolicy`, `AttachUserPolicy`, `AttachRolePolicy`, `PutRolePolicy`, `CreatePolicyVersion`, `SetDefaultPolicyVersion`.
+- **Evidence:** Event name, event source, source IP, and user identity where present.
+- **Recommendation:** Confirm the actor, authorization, and business reason for the IAM change.
+- **Limitations:** These events may be legitimate administrative work. CloudTrail collection/ingestion must be configured separately.
 
-**Purpose:** Identify selected AWS control-plane actions that require review.
+### NET-009 — Security Group Modification
 
-- **Telemetry:** CloudTrail, if configured and available.
-- **Candidate events:** selected IAM, EC2, security-group, or S3 API activity.
-- **Logic:** Match documented event names or conditions that violate the project's expected activity policy.
-- **Initial severity:** Context-dependent.
-- **Evidence:** Event name, time, principal, source information, and affected resource where available.
-- **Recommended action:** Verify the actor and whether the change was authorized.
-- **Caution:** CloudTrail is optional in the core project and must be explicitly implemented for this rule to operate.
+- **Purpose:** Identify selected security-group modification API events.
+- **Input:** `AWS_API` derived from CloudTrail.
+- **Selected event names:** `AuthorizeSecurityGroupIngress`, `AuthorizeSecurityGroupEgress`, `RevokeSecurityGroupIngress`, `RevokeSecurityGroupEgress`, `ModifySecurityGroupRules`, `UpdateSecurityGroupRuleDescriptionsIngress`, `UpdateSecurityGroupRuleDescriptionsEgress`.
+- **Evidence:** Event name, event source, source IP, and request parameters/resource details where present.
+- **Recommendation:** Verify the change against an approved change request and inspect the resulting security-group rules.
+- **Limitations:** Detecting a modification API event does not independently verify the final effective configuration. CloudTrail ingestion must be configured separately.
 
-### NET-009 — Risky Security-Group Modification (Optional)
+## 4. Planned Rules
 
-**Purpose:** Detect a security-group change that broadens access beyond the intended policy.
+### NET-002 — Internet-Exposed SSH
 
-- **Telemetry:** CloudTrail events and/or configuration inspection.
-- **Candidate evidence:** changed ingress/egress permissions, affected group, source range, port, actor, timestamp.
-- **Logic:** Flag a change that introduces a prohibited broad source range or exposes a sensitive port.
-- **Initial severity:** High when a material exposure is confirmed by the available configuration evidence.
-- **Recommended action:** Verify authorization and restore the intended rule if appropriate.
-- **Caution:** The system must inspect actual configuration or suitable change evidence; flow logs alone are insufficient.
+- **Condition:** Security-group ingress permits TCP port 22 from `0.0.0.0/0` or `::/0`.
+- **Required data:** EC2 Security Group configuration.
+- **Suggested severity:** HIGH; potentially CRITICAL depending on asset/context.
+- **Status:** Not implemented in the current Flow Logs detector.
 
-### NET-010 — Repeated Authentication Failure (Conditional)
+### NET-003 — Internet-Exposed RDP
 
-**Purpose:** Identify repeated failed authentication attempts when a suitable log source is available.
+- **Condition:** Security-group ingress permits TCP port 3389 from `0.0.0.0/0` or `::/0`.
+- **Required data:** EC2 Security Group configuration.
+- **Suggested severity:** HIGH; potentially CRITICAL depending on asset/context.
+- **Status:** Not implemented in the current Flow Logs detector.
 
-- **Telemetry:** An appropriate authentication log source; VPC Flow Logs alone are insufficient.
-- **Logic:** Count failures by relevant account/source/target over a defined time window.
-- **Initial severity:** Context-dependent.
-- **Evidence:** Failure count, account/target, source, and time window where recorded.
-- **Recommended action:** Review the authentication events and account security.
-- **MITRE ATT&CK:** Potential mapping to T1110 when the evidence supports brute-force behavior.
-- **Caution:** Do not implement or claim this detection without the required authentication telemetry.
+### NET-010 — Repeated Authentication Failure
 
-## 4. Rule Configuration
+- **Condition:** At least 10 authentication failures for an account/user and source within 300 seconds, as proposed in the YAML specification.
+- **Required data:** Operating-system or application authentication logs.
+- **MITRE ATT&CK:** T1110 — Brute Force, only when the evidence supports it.
+- **Status:** Planned; VPC Flow Logs alone cannot establish authentication failures.
 
-Each rule should document:
+## 5. Risk Score and Severity
 
-- Rule ID and title.
-- Purpose.
-- Required telemetry source.
-- Required fields.
-- Threshold or matching logic.
-- Time window, if applicable.
-- Severity logic.
-- Finding evidence.
-- Recommended action.
-- Test cases.
-- Known limitations.
+The scorer uses project-defined rule base scores:
 
-Thresholds should be configurable rather than buried as unexplained constants in code.
+| Rule | Base score |
+|---|---:|
+| NET-001 | 55 |
+| NET-002 | 75 (reserved for planned rule) |
+| NET-003 | 75 (reserved for planned rule) |
+| NET-004 | 45 |
+| NET-005 | 55 |
+| NET-006 | 45 |
+| NET-007 | 50 |
+| NET-008 | 70 |
+| NET-009 | 80 |
+| Unknown rule | 30 |
 
-## 5. Testing Each Rule
+Implemented context adjustments:
 
-For every implemented rule:
+- Destination port 22 or 3389: +10.
+- Evidence indicates a `REJECT` flow: +5.
+- NET-001 with at least 20 unique destination ports: +10.
+- NET-009 request parameters contain `0.0.0.0/0` or `::/0`: +10.
 
-1. Create a test case using synthetic records or controlled activity in the authorized lab.
-2. Record the expected outcome.
-3. Run the parser and detection engine.
-4. Verify whether the rule triggers.
-5. Inspect the generated evidence and severity.
-6. Test a normal or non-matching case.
-7. Record false positives, limitations, and threshold adjustments.
+The final score is clamped to 0–100.
 
-## 6. Implementation Status
+| Severity | Score range |
+|---|---:|
+| CRITICAL | 85–100 |
+| HIGH | 65–84 |
+| MEDIUM | 40–64 |
+| LOW | 20–39 |
+| INFORMATIONAL | 0–19 |
 
-Use this table to track the actual project status. Do not mark a rule as implemented until it has been tested.
+This score is a transparent project prioritization heuristic, not an industry-standard risk score and not a probability of compromise.
 
-| Rule ID | Rule | Required source | Status |
-|---|---|---|---|
-| NET-001 | Possible port scan | VPC Flow Logs | Planned |
-| NET-002 | Internet-exposed SSH | Security-group configuration | Planned |
-| NET-003 | Internet-exposed RDP | Security-group configuration | Planned |
-| NET-004 | Repeated connection attempts | VPC Flow Logs | Planned |
-| NET-005 | Excessive rejected traffic | VPC Flow Logs | Planned |
-| NET-006 | Suspicious administrative/database port | Flow Logs + expected policy | Planned |
-| NET-007 | Unusual traffic volume | VPC Flow Logs + baseline | Planned |
-| NET-008 | Unusual AWS API activity | CloudTrail (optional) | Optional |
-| NET-009 | Risky security-group modification | CloudTrail/configuration evidence | Optional |
-| NET-010 | Repeated authentication failure | Authentication logs | Conditional |
+## 6. Rule Tuning and Governance
+
+- Tune thresholds using both normal and suspicious controlled test data.
+- Retain positive and negative test cases.
+- Document each threshold change and its reason.
+- Review false positives with workload context.
+- Do not map a rule to MITRE ATT&CK unless the behavior and telemetry support the mapping.
+- Keep the YAML specification and Python implementation aligned when runtime configuration support is added.

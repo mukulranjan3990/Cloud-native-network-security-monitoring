@@ -1,311 +1,159 @@
 # Project Overview
 
-## Project Title
+## 1. Project Identity
 
-**Automated Cloud-Native Network Security Monitoring & Automated Threat
-Detection System**
+**Project title:** Automated Cloud-Native Network Security Monitoring and Threat Detection System  
+**Domain:** Cloud security, network security, cybersecurity, and AWS  
+**Primary cloud platform:** Amazon Web Services (AWS)  
+**Primary programming language:** Python  
+**Project type:** Academic minimum viable product (MVP)
 
-## 1. Introduction
+## 2. Abstract
 
-The **Automated Cloud-Native Network Security Monitoring & Automated
-Threat Detection System** is a cybersecurity project focused on
-monitoring network and cloud security telemetry from an AWS environment,
-analyzing security events using explainable detection rules, assigning
-risk severity, generating security findings, and presenting those
-findings through a centralized dashboard.
+The project develops a Python-based monitoring and threat-detection application for selected AWS network and cloud activity. It uses Amazon VPC Flow Logs delivered to Amazon CloudWatch Logs as its primary network telemetry source. Selected AWS API activity can also be represented as CloudTrail events and evaluated by the detection engine when those events are supplied to it.
 
-The project is designed as a practical AWS-based security monitoring
-platform. Its primary focus is **Cloud Security, Network Security,
-Cybersecurity, Security Monitoring, Threat Detection, and Security
-Automation**.
+The processing workflow parses raw records into normalized events, evaluates explainable rule-based heuristics, assigns a project-defined risk score and severity, and stores events and findings in SQLite. A Streamlit dashboard provides a planned presentation and investigation layer for stored results.
 
-The primary cloud platform is **Amazon Web Services (AWS)** and the
-primary programming language is **Python**.
+The system is intended to help an administrator answer: **What activity is visible, which observations look suspicious, how should they be prioritized, and what should be investigated next?** A finding is an indicator requiring investigation; it is not automatically proof of a confirmed attack.
 
-## 2. Purpose
+## 3. Problem Statement
 
-Modern applications increasingly operate in cloud environments. Although
-AWS provides security services and controls, organizations must still
-configure, monitor, and investigate their cloud resources correctly.
+Cloud environments generate network and administrative activity that can be difficult to review manually. Suspicious patterns may include:
 
-This project provides a controlled security-monitoring environment where
-network and AWS security telemetry can be collected, normalized,
-analyzed, and converted into actionable security findings.
+- one source contacting many destination ports;
+- repeated connections to a destination service;
+- unusually high numbers of rejected flow records;
+- connections to sensitive administrative or database ports;
+- unexpectedly large individual flows;
+- sensitive IAM or security-group API changes.
 
-The central question addressed by the system is:
+Without a structured process, an administrator may struggle to correlate this activity, prioritize investigation, and retain evidence of why an alert was generated.
 
-> **What is happening inside my AWS network, is the activity suspicious,
-> how serious is it, and what should the security administrator do?**
+## 4. Aim
 
-## 3. Core Workflow
+Design and implement a small, reproducible AWS-focused security monitoring platform that collects selected telemetry, normalizes it, detects suspicious patterns with transparent rules, prioritizes findings, and makes the results reviewable.
 
-The proposed system follows this high-level workflow:
+## 5. Objectives
 
-``` text
-AWS VPC
-   |
-   v
-VPC Flow Logs
-   |
-   v
-CloudWatch Logs
-   |
-   v
-Python Log Parser
-   |
-   v
-Normalized Security Events
-   |
-   v
-Detection Engine
-   |
-   v
-Risk Scoring
-   |
-   v
-Security Findings
-   |
-   v
-SQLite Database
-   |
-   v
-Streamlit Dashboard
-   |
-   v
-Security Investigation / Alert
+1. Establish a controlled AWS test environment using VPC, EC2, Security Groups, and IAM.
+2. Enable VPC Flow Logs and deliver them to CloudWatch Logs.
+3. Retrieve configured CloudWatch log events using Python and Boto3.
+4. Parse standard VPC Flow Logs version 2 records into a normalized event structure.
+5. Parse selected CloudTrail JSON events for AWS API activity.
+6. Evaluate normalized events using explainable detection rules.
+7. Assign a 0–100 project-defined risk score and severity label.
+8. Store normalized events and findings in SQLite.
+9. Present stored findings and network summaries through a dashboard.
+10. Test the rules using normal and controlled suspicious-traffic examples.
+11. Document evidence, limitations, and recommendations.
+
+## 6. Scope
+
+### Included in the current MVP
+
+- AWS VPC and EC2 test-lab context.
+- Security Groups and IAM as relevant AWS security controls.
+- VPC Flow Logs as the primary network telemetry.
+- CloudWatch Logs collection through Boto3.
+- Python parsing and normalization.
+- Selected CloudTrail event parsing and detection logic.
+- Rule-based detection for selected network and AWS API events.
+- Explainable risk scoring and severity classification.
+- SQLite event and finding persistence.
+- Synthetic sample data and automated tests.
+- A Streamlit dashboard as the visualization layer.
+
+### Not implemented in the current MVP
+
+- A full SIEM or SOAR platform.
+- Machine-learning or AI-based threat detection.
+- A learned traffic baseline or statistical anomaly model.
+- Automatic blocking, quarantine, or modification of AWS resources.
+- Complete authentication-failure detection.
+- Live security-group configuration inventory for public SSH/RDP exposure.
+- Automatic CloudTrail trail discovery and ingestion.
+- Multi-cloud monitoring.
+- Production-grade high availability or multi-tenant operation.
+
+### Infrastructure-as-code scope clarification
+
+The main technical brief discusses Terraform as a way to reproduce AWS infrastructure. The separate 12-week project timeline explicitly says Terraform is excluded from the core scope. The current Python MVP does not provision AWS resources with Terraform. Treat Terraform as deferred/optional until the project supervisor or final approved scope resolves this planning difference.
+
+## 7. High-Level Workflow
+
+```text
+AWS VPC / EC2 / Security Groups
+             |
+             v
+        VPC Flow Logs
+             |
+             v
+      Amazon CloudWatch Logs
+             |
+             v
+       Boto3 Log Collector
+             |
+             v
+        Event Parser
+             |
+             v
+      Normalized Events
+             |
+             v
+       Threat Detector <------ Selected CloudTrail JSON events
+             |
+             v
+        Risk Scorer
+             |
+             v
+      SQLite Events & Findings
+             |
+             v
+       Streamlit Dashboard
 ```
 
-Selected AWS control-plane activity can additionally be monitored
-through **CloudTrail**.
+CloudTrail event parsing and selected event detection are supported by the code, but the VPC Flow Logs collector does not automatically collect CloudTrail events. CloudTrail ingestion must be configured separately.
 
-## 4. Main AWS Components
+## 8. Technology Stack
 
-### Core Components
+| Area | Technology | Purpose |
+|---|---|---|
+| Cloud platform | AWS | Controlled network and cloud activity environment |
+| Network telemetry | VPC Flow Logs | Network flow observations |
+| Log destination | CloudWatch Logs | Centralized flow-log storage and retrieval |
+| AWS activity source | CloudTrail | Selected AWS API/control-plane events |
+| Programming | Python | Parsing, detection, scoring, persistence |
+| AWS SDK | Boto3 | CloudWatch Logs API access |
+| Database | SQLite | Local event and finding storage |
+| Dashboard | Streamlit | Security overview and investigation interface |
+| Tests | pytest | Automated unit and behavior checks |
 
--   Amazon VPC
--   Amazon EC2
--   VPC Flow Logs
--   Amazon CloudWatch Logs
--   AWS IAM
--   Security Groups
+## 9. Expected Outcomes
 
-### Optional Components
+The MVP should demonstrate that it can:
 
--   AWS CloudTrail
--   Amazon SNS
--   AWS Lambda
--   Amazon EventBridge
--   Amazon S3
--   AWS Security Hub
--   Amazon Athena
+- read sample flow-log records and, when configured, retrieve records from CloudWatch Logs;
+- normalize supported network and selected AWS API events;
+- generate findings for supported detection conditions;
+- explain findings through rule identifiers and evidence;
+- assign a risk score and severity;
+- store events and findings without duplicating identical findings;
+- display stored results for investigation;
+- pass automated tests for parser, detector, scorer, and database behavior.
 
-Optional services are not required for the minimum viable project.
+These outcomes describe intended and implemented project behavior; they do not imply that every proposed rule or AWS integration is complete.
 
-## 5. Core Technology Stack
+## 10. Success Criteria
 
-| Area | Technology |
-| --- | --- |
-| Cloud Platform | AWS |
-| Network | VPC, Subnets, Route Tables, Security Groups |
-| Compute | EC2 |
-| Network Telemetry | VPC Flow Logs |
-| Log Collection | CloudWatch Logs |
-| AWS API Monitoring | CloudTrail (optional) |
-| Programming | Python |
-| AWS SDK | Boto3 |
-| Database | SQLite |
-| Dashboard | Streamlit |
-| Threat Reference | MITRE ATT&CK |
-| Security Logging Guidance | OWASP Logging Cheat Sheet |
-| Security Framework Reference | NIST CSF 2.0 |
+The project is considered a successful MVP when its implemented workflow is reproducible, supported detections have test cases, stored findings can be reviewed, and limitations are clearly documented. Detection accuracy must be evaluated against controlled data rather than asserted without evidence.
 
-## 6. Major Functional Modules
+## 11. Key References
 
-1.  **AWS Security Lab** --- controlled VPC, subnet, EC2, and
-    security-group environment.
-2.  **Network Telemetry Collection** --- collection of VPC Flow Logs.
-3.  **AWS Activity Monitoring** --- selected CloudTrail activity where
-    implemented.
-4.  **Python Log Parser** --- parsing and normalization of raw security
-    events.
-5.  **Detection Engine** --- evaluation of normalized events against
-    predefined rules.
-6.  **Risk Scoring** --- explainable severity and risk classification.
-7.  **Findings Management** --- storage and management of security
-    findings.
-8.  **Security Dashboard** --- visualization, filtering, and
-    investigation support.
-9.  **Testing & Validation** --- controlled security scenarios and
-    false-positive analysis.
-10. **Optional Alerting/Response** --- notification or approval-based
-    response after the core detection system is stable.
-
-## 7. Initial Detection Scope
-
-The project targets approximately **8--10 strong detection rules**.
-Initial examples include:
-
--   Possible port scanning
--   Internet-exposed SSH
--   Internet-exposed RDP
--   Repeated connection attempts
--   Excessive rejected traffic
--   Suspicious administrative/database ports
--   Unusual traffic volume
--   Unusual AWS API activity
--   Security-group modification
--   Repeated authentication failure where an appropriate authentication
-    log source exists
-
-A suspicious event is not automatically treated as a confirmed attack.
-Detection results are presented as security findings supported by
-evidence.
-
-## 8. Risk and Findings
-
-Each security finding can contain:
-
--   Finding ID
--   Rule ID
--   Timestamp
--   Source
--   Destination
--   Resource
--   Description
--   Severity
--   Risk score
--   Evidence
--   Recommended action
--   Status
-
-Severity levels are:
-
--   CRITICAL
--   HIGH
--   MEDIUM
--   LOW
--   INFORMATIONAL
-
-The initial risk-scoring model is intended to be simple and explainable,
-using factors such as exposure, frequency, target sensitivity,
-destination port, event type, and source reputation where available.
-
-## 9. Dashboard
-
-The Streamlit dashboard is intended to provide:
-
-### Security Overview
-
--   Overall risk score
--   Critical, high, medium, and low findings
--   Recent security events
-
-### Network Monitoring
-
--   Top source IPs
--   Top destination IPs
--   Most targeted ports
--   Accepted and rejected traffic
--   Traffic volume
--   Suspicious events
-
-### Threat Detection
-
--   Port-scan indicators
--   Suspicious administrative activity
--   Security-group changes
--   Traffic anomalies
--   Other validated detection results
-
-### Investigation
-
-Users should be able to filter findings by timestamp, source IP,
-destination IP, port, protocol, severity, rule, and resource.
-
-## 10. Security Approach
-
-The project itself should follow secure development practices,
-including:
-
--   IAM least privilege
--   Temporary credentials where practical
--   No hard-coded AWS credentials
--   Secure configuration
--   Authentication and authorization where required
--   Input validation
--   Audit logging
--   Secure API design
--   Encryption where appropriate
-
-All testing must be performed only against infrastructure owned by the
-project or explicitly authorized for testing.
-
-## 11. Academic Project Scope
-
-The core project intentionally focuses on:
-
--   AWS
--   VPC
--   EC2
--   Security Groups
--   VPC Flow Logs
--   CloudWatch Logs
--   Python
--   Boto3
--   Detection Rules
--   Risk Scoring
--   SQLite
--   Streamlit Dashboard
--   MITRE ATT&CK mapping
-
-Terraform, Docker, Kubernetes, Jenkins, GitHub Actions, Helm, Argo CD,
-CI/CD, DevSecOps, and multi-cloud CSPM are **not required for the core
-project** according to the project scope plan.
-
-## 12. Expected Outcome
-
-At completion, the project should provide a working AWS
-security-monitoring MVP that can:
-
-1.  Deploy or use a controlled AWS test environment.
-2.  Collect network telemetry.
-3.  Parse and normalize security events.
-4.  Detect at least eight security conditions.
-5.  Generate structured findings.
-6.  Assign severity and risk.
-7.  Store findings.
-8.  Display findings through a dashboard.
-9.  Explain why findings were generated.
-10. Provide remediation recommendations.
-11. Map selected detections to appropriate MITRE ATT&CK techniques.
-12. Demonstrate controlled security test scenarios.
-13. Produce evidence and technical documentation.
-
-## 13. Project Timeline
-
-The planned duration is **12 weeks**:
-
-1.  Project Research & Requirement Analysis
-2.  AWS Network Security Lab Setup
-3.  Network Telemetry Collection
-4.  Python Log Processing
-5.  Threat Detection Engine
-6.  Risk Scoring & Finding Management
-7.  Security Dashboard
-8.  Testing & Attack Simulation
-9.  Security Validation & False-Positive Analysis
-10. Documentation & Final Report
-11. Synopsis & Presentation
-12. Final Demonstration & Submission
-
-## 14. Project Value
-
-The primary value of the project is not the dashboard itself. The core
-value is the combination of:
-
-**AWS telemetry + security engineering + network analysis + threat
-detection + risk assessment + security automation.**
-
-The implementation should prioritize **correctness, security,
-explainability, reproducibility, testing, documentation, and practical
-implementation**.
+- [Amazon VPC documentation](https://docs.aws.amazon.com/vpc/latest/userguide/)
+- [AWS VPC Flow Logs](https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs.html)
+- [AWS VPC Flow Log records](https://docs.aws.amazon.com/vpc/latest/userguide/flow-log-records.html)
+- [Amazon CloudWatch Logs](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/)
+- [AWS CloudTrail](https://docs.aws.amazon.com/cloudtrail/)
+- [Boto3 documentation](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html)
+- [Python documentation](https://docs.python.org/3/)
+- [Streamlit documentation](https://docs.streamlit.io/)

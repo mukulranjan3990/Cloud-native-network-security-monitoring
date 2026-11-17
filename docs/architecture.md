@@ -1,171 +1,173 @@
 # System Architecture
 
-## 1. Purpose
+## 1. Architecture Goal
 
-This document describes the proposed architecture for the **Automated Cloud-Native Network Security Monitoring & Automated Threat Detection System**. The core design collects AWS network telemetry, processes it with Python, evaluates explainable detection rules, stores findings in SQLite, and presents them in a Streamlit dashboard.
+The system follows a modular, event-processing architecture. It collects selected AWS telemetry, normalizes raw records, evaluates detection heuristics, scores findings, stores results, and exposes them for analyst review.
 
-## 2. Architecture Goals
+The design prioritizes correctness and explainability over complex infrastructure.
 
-- Collect useful network-security telemetry from a controlled AWS environment.
-- Normalize raw events into a consistent format.
-- Detect suspicious patterns with documented rules.
-- Assign explainable severity and risk scores.
-- Store findings for investigation.
-- Provide centralized visibility through a dashboard.
-- Keep the MVP manageable and reproducible.
-
-## 3. High-Level Architecture
+## 2. Logical Architecture
 
 ```text
-Internet / Test Traffic
-        |
-        v
-   AWS VPC / EC2
-        |
-        v
-   VPC Flow Logs
-        |
-        v
- Amazon CloudWatch Logs
-        |
-        v
- Python Collector / Reader
-        |
-        v
-   Log Parser
-        |
-        v
- Normalized Events
-        |
-        v
-  Detection Engine <---- Detection Rules
-        |
-        v
-   Risk Scoring
-        |
-        v
- Security Findings
-        |
-        v
-   SQLite Database
-        |
-        v
- Streamlit Dashboard
-        |
-        v
- Investigation / Dashboard Alert
+                   AWS ACCOUNT (CONTROLLED TEST ENVIRONMENT)
+  +----------------------------------------------------------------+
+  |                                                                |
+  |  VPC                                                           |
+  |  +-------------------+         +----------------------------+  |
+  |  | EC2 / ENIs        |         | Security Groups / IAM      |  |
+  |  +---------+---------+         +--------------+-------------+  |
+  |            |                                  |                |
+  |            v                                  v                |
+  |      VPC Flow Logs                      CloudTrail events      |
+  |            |                                  |                |
+  +------------|----------------------------------|----------------+
+               v                                  |
+       CloudWatch Logs                            | separately
+               |                                  | configured feed
+               v                                  v
+       Boto3 CloudWatch collector           CloudTrail JSON input
+               |                                  |
+               +------------------+---------------+
+                                  v
+                           Event Parser
+                                  |
+                                  v
+                         Normalized Events
+                                  |
+                                  v
+                           Threat Detector
+                                  |
+                                  v
+                            Risk Scorer
+                                  |
+                                  v
+                         SQLite Database
+                         /             \
+                        v               v
+                Findings / Events   Streamlit UI
+                                        |
+                                        v
+                              Analyst investigation
 ```
 
-Optional CloudTrail telemetry can feed a separate AWS API-event processing path into the detection engine. Optional email/SNS notifications or approval-based response may be added after the core system works.
+## 3. Components and Responsibilities
 
-## 4. Main Components
+| Component | File / service | Responsibility |
+|---|---|---|
+| AWS network environment | VPC, EC2, ENIs, Security Groups | Controlled source of network activity |
+| Network telemetry | VPC Flow Logs | Records network flow observations |
+| Log storage | CloudWatch Logs | Receives and stores Flow Log records |
+| Collector | `src/collector.py` | Retrieves log events from a configured CloudWatch log group |
+| Parser | `src/parser.py` | Converts Flow Log lines and selected CloudTrail JSON into normalized dictionaries |
+| Detection engine | `src/detector.py` | Evaluates supported rules against a batch of normalized events |
+| Risk scorer | `src/risk_scorer.py` | Adds base score, context adjustments, severity, and score explanations |
+| Persistence | `src/database.py` | Stores events/findings and provides retrieval/status methods in SQLite |
+| Pipeline entry point | `scripts/run_pipeline.py` | Connects input, parsing, detection, scoring, and persistence |
+| Dashboard | `dashboard/app.py` | Reads SQLite data and presents summaries/findings |
+| Rule specification | `rules/detection-rules.yaml` | Documents rule definitions and planned/implemented status |
 
-### 4.1 AWS Network Environment
+## 4. Event Processing Sequence
 
-The controlled environment contains a VPC, subnets, an EC2 instance, and security groups. Testing must be limited to infrastructure owned by the project or explicitly authorized for testing.
+1. The operator selects sample input or CloudWatch as the pipeline source.
+2. For sample input, non-empty, non-comment records are read from `.log` files.
+3. For CloudWatch input, the collector calls `FilterLogEvents` for a configured time range and log group.
+4. The parser identifies the input type:
+   - whitespace-delimited VPC Flow Log record;
+   - CloudWatch wrapper containing a `message`;
+   - selected CloudTrail JSON event.
+5. The parser creates a normalized event with an `event_type` of `NETWORK_FLOW` or `AWS_API`.
+6. The detector separates supported event types and evaluates rule-specific conditions.
+7. The risk scorer attaches a score from 0 to 100, a severity, and explanatory risk factors.
+8. The database stores normalized events and scored findings.
+9. The dashboard reads the database and displays event/finding summaries.
 
-### 4.2 VPC Flow Logs
+## 5. Normalized Event Model
 
-VPC Flow Logs provide the primary network telemetry source. Useful fields may include source and destination IP addresses, ports, protocol, packet and byte counts, timestamps, traffic action, and network-interface identifier. The exact fields depend on the configured flow-log format.
+### 5.1 Network flow event
 
-### 4.3 CloudWatch Logs
+Typical fields:
 
-CloudWatch Logs is the planned destination for the selected VPC Flow Logs. It provides a place from which the project can access records for processing and investigation.
-
-### 4.4 Python Processing Layer
-
-The Python processing layer reads records, validates and parses fields, handles malformed data, and converts supported records into normalized events.
-
-### 4.5 Detection Engine
-
-The engine evaluates normalized events against documented rules. A detection should produce an explainable result with rule ID, evidence, and context. A detection indicates suspicious behavior, not necessarily a confirmed attack.
-
-### 4.6 Risk Scoring
-
-The risk module assigns a documented score and severity using factors such as exposure, frequency, target sensitivity, destination port, and event type where those values are available.
-
-### 4.7 SQLite Findings Store
-
-SQLite stores findings and their investigation context. The schema should preserve identifiers, timestamps, rule IDs, severity, risk score, evidence, recommendations, and status where applicable.
-
-### 4.8 Streamlit Dashboard
-
-The dashboard presents finding counts, recent events, severity summaries, and network indicators. Filters should be provided for available fields such as timestamp, source/destination IP, port, protocol, severity, rule, and resource.
-
-## 5. Data Flow
-
-1. Network traffic occurs in the controlled AWS lab.
-2. VPC Flow Logs record supported flow information.
-3. Records are delivered to CloudWatch Logs.
-4. The Python reader obtains records.
-5. The parser validates and normalizes them.
-6. Detection rules evaluate the normalized events.
-7. Matching rules create findings with supporting evidence.
-8. The risk module assigns a score and severity.
-9. Findings are saved in SQLite.
-10. The dashboard displays findings for review and investigation.
-
-If CloudTrail is added, AWS API/control-plane events must be identified and handled distinctly from network-flow events.
-
-## 6. Suggested Application Structure
-
-```text
-cloud-security-monitor/
-├── README.md
-├── docs/
-│   ├── project-overview.md
-│   ├── problem-statement.md
-│   ├── objectives.md
-│   ├── requirements.md
-│   ├── architecture.md
-│   ├── threat-model.md
-│   ├── detection-rules.md
-│   ├── risk-scoring.md
-│   ├── testing-strategy.md
-│   ├── limitations.md
-│   └── references.md
-├── src/
-│   ├── collector/
-│   ├── parser/
-│   ├── detector/
-│   ├── rules/
-│   ├── risk/
-│   ├── alerts/
-│   └── database/
-├── dashboard/
-├── tests/
-│   ├── unit/
-│   ├── integration/
-│   └── test-data/
-├── sample-data/
-├── scripts/
-└── requirements.txt
+```json
+{
+  "event_type": "NETWORK_FLOW",
+  "timestamp": "UTC ISO-8601 timestamp",
+  "account_id": "AWS account identifier",
+  "interface_id": "eni identifier",
+  "source_ip": "source address",
+  "destination_ip": "destination address",
+  "source_port": 51524,
+  "destination_port": 443,
+  "protocol": 6,
+  "packets": 12,
+  "bytes": 8420,
+  "start_time": 1731501000,
+  "end_time": 1731501060,
+  "action": "ACCEPT",
+  "log_status": "OK",
+  "raw": {}
+}
 ```
 
-This is a suggested organization; folder names may be adjusted to the actual implementation.
+Missing or unavailable values remain `None` where appropriate. The example values are illustrative, not live AWS data.
 
-## 7. Security Design Principles
+### 5.2 AWS API event
 
-- Apply least-privilege IAM permissions.
-- Do not hard-code or commit AWS credentials.
-- Prefer roles and temporary credentials where practical.
-- Validate log input and handle parsing failures safely.
-- Do not expose secrets in application logs.
-- Keep the test environment separate from production.
-- Do not automatically block traffic in the initial MVP.
-- Record and review any future response action.
+Selected CloudTrail events use `event_type: AWS_API` and include timestamp, source IP, account, event source/name, region, user ARN/type, request parameters, and raw payload. Network-only fields are not fabricated for an AWS API event.
 
-## 8. Deployment and Cost Considerations
+## 6. Detection and Scoring
 
-AWS service availability, permissions, configuration, and costs depend on the selected account and region. Use a small controlled lab, monitor resource usage, and remove billable resources when testing is complete.
+The detector currently uses threshold-based, batch-oriented heuristics. Its default thresholds include:
 
-## 9. Architecture Acceptance Checks
+| Rule | Current default condition |
+|---|---|
+| NET-001 | At least 10 unique destination ports from one source within 60 seconds |
+| NET-004 | At least 20 connections to the same destination and port from one source within 300 seconds |
+| NET-005 | At least 100 REJECT flow records from one source within 3,600 seconds |
+| NET-006 | Destination port in 22, 3389, 3306, 5432, 6379, or 27017 |
+| NET-007 | One flow has at least 500 MiB (`500 * 1024 * 1024`) |
+| NET-008 | Event name matches selected IAM/access-management actions |
+| NET-009 | Event name matches selected security-group modification actions |
 
-- [ ] VPC Flow Logs are enabled for the selected test resources.
-- [ ] Flow-log records can be accessed from CloudWatch Logs.
-- [ ] Python can parse supported records into normalized events.
-- [ ] Detection rules receive normalized events.
-- [ ] Findings include evidence and a rule identifier.
-- [ ] Findings are persisted in SQLite.
-- [ ] Streamlit displays findings and supports useful filters.
-- [ ] Optional data sources are clearly separated from core telemetry.
+Risk scoring starts with a rule base score, applies explicit context adjustments, and clamps the result to 0–100. Severity bands are:
+
+| Severity | Score |
+|---|---:|
+| CRITICAL | 85–100 |
+| HIGH | 65–84 |
+| MEDIUM | 40–64 |
+| LOW | 20–39 |
+| INFORMATIONAL | 0–19 |
+
+The score is a project-defined prioritization heuristic, not a recognized industry-standard score or attack probability.
+
+## 7. Data Storage
+
+SQLite currently stores two main tables:
+
+- `events`: event type, timestamp, source/destination, destination port, action, serialized payload, and creation time.
+- `findings`: stable finding key, rule, title, description, timestamp, source/destination, port, severity, risk score, status, recommendation, serialized payload, and creation time.
+
+Indexes support timestamp, source IP, severity, and status queries. Finding statuses supported by the database layer are `OPEN`, `INVESTIGATING`, and `CLOSED`.
+
+## 8. Trust Boundaries and Security Controls
+
+- AWS account boundary: only a dedicated, authorized test environment should be used.
+- IAM boundary: collector credentials should have least-privilege read access.
+- Log-data boundary: log content is untrusted input and must be parsed/validated.
+- Local storage boundary: database and raw log artifacts may contain sensitive infrastructure details; do not commit them.
+- Analyst action boundary: the MVP reports and recommends; it does not automatically block or modify resources.
+
+## 9. Deployment View
+
+The current MVP can run locally from a Python virtual environment. Sample-data mode does not require AWS credentials. Live collection requires a configured AWS credential provider, region, and CloudWatch log group.
+
+The dashboard is a separate Streamlit process that reads the configured SQLite database. Confirm the database path is consistent between pipeline and dashboard.
+
+## 10. Known Architecture Gaps
+
+- CloudTrail event parsing/detection exists, but CloudTrail collection and ingestion are separate work.
+- Security-group configuration inspection for NET-002/003 is not implemented.
+- Authentication telemetry for NET-010 is not integrated.
+- The YAML rules file is a declarative specification; runtime YAML loading is not currently connected to `src/detector.py`.
+- No automated response, distributed queue, or production-scale architecture is included.
+- Terraform scope is deferred pending resolution of the difference between the main technical brief and the 12-week timeline.
